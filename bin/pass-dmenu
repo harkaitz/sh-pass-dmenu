@@ -1,0 +1,164 @@
+#!/bin/sh -e
+##:
+#h: Usage: pass-dmenu [CRED|/add|/show|/select|@PASS] [/salt|/edit] [/clip|/view]
+#h:
+#h: Small password manager based on pass(1) and dmenu(1).
+##:
+pass_dmenu() {
+    local arg0 arg1 cred pass interactive txt
+    
+    ## Get first argument.
+    if test ! -n "$1"; then
+        arg0="$(dmenu_prompt <<-EOF
+		$(pass_ls)
+		/add
+		/show
+		EOF
+              )"
+        test -n "${arg0}"
+        interactive=y
+    elif test @"$1" = @"/select"; then
+        arg0="$(pass_ls | dmenu_prompt)"
+        test -n "${arg0}"
+        shift
+        interactive=y
+    else
+        arg0="$1"
+        shift
+        interactive=
+    fi
+
+    ## Select credentials.
+    case "${arg0}" in
+        /add)
+            cred="$(pass_ls | dmenu_prompt 'New')"; test -n "${cred}"
+            ${PASS_DMENU_TERM:-xterm} -e pass add "${cred}"
+            pass="$(pass "${cred}")"
+            ;;
+        /show)
+            if test -n "${interactive}"; then
+                pass_dmenu_show_variables | dmenu_prompt 'Variables' >/dev/null
+            else
+                pass_dmenu_show_variables
+            fi
+            return 0
+            ;;
+        @*)
+            cred=""
+            pass="${arg0#@}"
+            ;;
+        *)
+            cred="${arg0}"
+            pass="$(pass "${cred}")"
+            ;;
+    esac
+    test -n "${pass}"
+
+    while true; do
+    
+        ## Get second argument.
+        if test -n "$1"; then
+            arg1="$1"
+            shift
+        else
+            arg1="$(dmenu_prompt <<-EOF | sed 's| .*||'
+		/clip      : User to 'primary' password to 'clipboard'
+		/edit      : Edit credentials.
+		/salt      : Add salt to password.
+		/view      : View username and password.
+		EOF
+               )"
+            test -n "${arg1}"
+        fi
+    
+        ## Operate credentials.
+        case "${arg1}" in
+            /clip)
+                if test -n "${cred}"; then
+                    basename "${cred}" | tr -d '\n' | xclip -selection "primary"   -i
+                else
+                    echo -n | xclip -selection "primary" -i
+                fi    
+                echo -n "${pass}" | xclip -selection "clipboard" -i
+                break
+                ;;
+            /edit)
+                if test -n "${cred}"; then
+                    ${PASS_DMENU_TERM:-xterm} -e pass edit "${cred}"
+                    pass="$(pass "${cred}")"
+                    test -n "${pass}"
+                fi
+                ;;
+            /salt)
+                pass="${pass}$(dmenu_prompt "Salt" </dev/null)"
+                test -n "${pass}"
+                ;;
+            /view)
+                txt="${cred:+$(basename "${cred}")}:${pass}"
+                if test -n "${interactive}"; then
+                    echo "${txt}" | dmenu_prompt >/dev/null
+                else
+                    echo "${txt}"
+                fi
+                ;;
+            *)
+                break
+                ;;
+        esac
+
+    done
+}
+pass_dmenu_show_variables() {
+    cat <<-EOF
+	PASS_DMENU_BACKGROUND : ${PASS_DMENU_BACKGROUND}
+	PASS_DMENU_FOREGROUND : ${PASS_DMENU_FOREGROUND}
+	PASS_DMENU_PROMPT     : ${PASS_DMENU_PROMPT}
+	PASS_DMENU_TERM       : ${PASS_DMENU_TERM}
+	PASSWORD_STORE_DIR     : ${PASSWORD_STORE_DIR}
+	EOF
+}
+pass_dmenu_calc_variables() {
+    PASS_DMENU_BACKGROUND="${PASS_DMENU_BACKGROUND:-#FF8C00}"
+    PASS_DMENU_FOREGROUND="${PASS_DMENU_FOREGROUND:-black}"
+    if test ! -n "${PASS_DMENU_PROMPT}"; then
+        PASS_DMENU_PROMPT='PASS-DMENU 🔒 %s:'
+    fi
+    if test -n "${PASS_DMENU_TERM}"; then
+        true
+    elif which st >/dev/null 2>&1; then
+        PASS_DMENU_TERM='st'
+    else
+        PASS_DMENU_TERM="xterm -fn -*-fixed-medium-r-*-*-20-*-*-*-*-*-* -bg ${PASS_DMENU_BACKGROUND} -fg ${PASS_DMENU_FOREGROUND}"
+    fi
+    PASSWORD_STORE_DIR="${PASSWORD_STORE_DIR:-${HOME}/.password-store}"
+}
+## -------------------------------------------------------------------
+dmenu_prompt() {
+    local prompt="$(printf "${PASS_DMENU_PROMPT}" "$1")"
+    env dmenu -p "${prompt}" -l '10' -sf 'black' -sb '#FF8C00'
+}
+pass_ls() {
+    local pwd="$(pwd)"
+    local sed1='s|^[^:]*://\([^/]*\).*|\1|p'
+    
+    ## Get domain from selection.
+    local c="$(xclip -selection "clipboard" -o - 2>/dev/null | sed -n "${sed1}")"
+
+    ## List passwords.
+    if test -d "${PASSWORD_STORE_DIR}"; then
+        cd "${PASSWORD_STORE_DIR}"
+        if test -n "${c}"; then
+            find -type f -name '*.gpg' | sed 's|^./||;s|\.gpg$||' | grep "${c}"
+        fi
+        find -type f -name '*.gpg' | sed 's|^./||;s|\.gpg$||'
+        cd "${pwd}"
+    fi
+}
+## -------------------------------------------------------------------
+pass_dmenu_calc_variables
+if test @"${SCRNAME:-$(basename "$0")}" = @"pass-dmenu"; then
+    case "${1}" in
+        -h|--help) sed -n 's/^ *#h: \{0,1\}//p' "$0";;
+        *)         pass_dmenu "$@"; exit 0;;
+    esac
+fi
