@@ -49,7 +49,7 @@ pass_dmenu() {
             ;;
         *)
             cred="${arg0}"
-            pass="$(pass "${cred}")"
+            pass="$(pass "${cred}" | head -n 1)"
             ;;
     esac
     test -n "${pass}"
@@ -85,7 +85,7 @@ pass_dmenu() {
             /edit)
                 if test -n "${cred}"; then
                     ${PASS_DMENU_TERM:-xterm} -e pass edit "${cred}"
-                    pass="$(pass "${cred}")"
+                    pass="$(pass "${cred}" | head -n 1)"
                     test -n "${pass}"
                 fi
                 ;;
